@@ -1,0 +1,10 @@
+_private/
+build/
+bin/
+obj/
+mockups/
+unity/Library/
+unity/Logs/
+unity/Temp/
+unity/UserSettings/
+unity/obj/
