@@ -12,21 +12,22 @@ using Object = UnityEngine.Object;
 namespace TripodCam;
 
 /// Tripod Cam for Flipping is Hard: press T to fly a camera to a spot and plant a tripod there (fixed, aiming at
-/// Flippy, or following Flippy), press Y to record what it sees (and the game's sound) to an MP4 while you keep playing,
-/// M for the panel.
+/// Flippy, following Flippy, or gliding through keyframes you set with I), press Y to record what it sees (and the
+/// game's sound) to an MP4 while you keep playing, M for the panel.
 /// Client-side only: nothing is sent to other players.
-[BepInPlugin(Guid, "Tripod Cam", "0.3.0")]
+[BepInPlugin(Guid, "Tripod Cam", "0.4.0")]
 public class Plugin : BasePlugin
 {
     public const string Guid = "com.fabuleo8796.tripodcam";
     internal static ManualLogSource Logger;
-    internal static ConfigEntry<Key> TripodKey, RecordKey, MenuKey;
+    internal static ConfigEntry<Key> TripodKey, RecordKey, MenuKey, KeyframeKey, ToFlippyKey;
     internal static ConfigEntry<int> Width, Height, Fps;
     internal static ConfigEntry<VideoQuality> Quality;
     internal static ConfigEntry<bool> GpuEncoder, HideNames, Shadows, SmoothEdges, Preview, Sound;
     internal static ConfigEntry<int> SoundOffsetMs;
     internal static ConfigEntry<string> Folder;
-    internal static ConfigEntry<float> FlySpeed, LookSpeed, Smoothing, AimHeight;
+    internal static ConfigEntry<float> FlySpeed, LookSpeed, ShiftBoost, Smoothing, AimHeight, KeyGap;
+    internal static ConfigEntry<PathEnd> PathEndMode;
 
     public override void Load()
     {
@@ -34,6 +35,8 @@ public class Plugin : BasePlugin
         TripodKey = Config.Bind("Keys", "Tripod", Key.T, "Place or move the tripod.");
         RecordKey = Config.Bind("Keys", "Record", Key.Y, "Start or stop recording.");
         MenuKey = Config.Bind("Keys", "Menu", Key.M, "Open or close the Tripod Cam panel.");
+        KeyframeKey = Config.Bind("Keys", "Keyframe", Key.I, "Keyframes mode: add a keyframe where the camera is (while placing), or start the path over (while recording).");
+        ToFlippyKey = Config.Bind("Keys", "ToFlippy", Key.H, "While placing: bring the camera back to Flippy, seen like the game shows it.");
         Width = Config.Bind("Video", "Width", 1920, "Video width in pixels.");
         Height = Config.Bind("Video", "Height", 1080, "Video height in pixels.");
         Fps = Config.Bind("Video", "Fps", 30, new ConfigDescription("Frames per second of the video.", new AcceptableValueRange<int>(15, 60)));
@@ -48,15 +51,18 @@ public class Plugin : BasePlugin
         Folder = Config.Bind("Video", "Folder", "", "Where videos are saved (the panel's Change button picks it). Empty = Videos\\Flipping is Hard.");
         FlySpeed = Config.Bind("Placing", "FlySpeed", 6f, "Starting fly speed while placing the tripod (units per second).");
         LookSpeed = Config.Bind("Placing", "LookSpeed", 1f, "Mouse look speed while placing the tripod.");
+        ShiftBoost = Config.Bind("Placing", "ShiftBoost", 12f, new ConfigDescription("How many times faster the camera flies while Shift is held.", new AcceptableValueRange<float>(2f, 50f)));
         Smoothing = Config.Bind("Tripod", "Smoothing", 0.35f, new ConfigDescription("How smoothly Aim and Follow turn and move (0 = locked on).", new AcceptableValueRange<float>(0f, 2f)));
         AimHeight = Config.Bind("Tripod", "AimHeight", 0.3f, "Aim this far above Flippy's middle.");
+        KeyGap = Config.Bind("Keyframes", "Gap", 2f, new ConfigDescription("Seconds between keyframes added one after another (drag them on the timeline to change it).", new AcceptableValueRange<float>(0.25f, 30f)));
+        PathEndMode = Config.Bind("Keyframes", "AtEnd", PathEnd.Hold, "After the last keyframe while recording: Hold (the camera stays there), Loop (the path starts over) or Stop (recording stops).");
 
         ClassInjector.RegisterTypeInIl2Cpp<TripodDriver>();
         var host = new GameObject("TripodCam");
         Object.DontDestroyOnLoad(host);
         host.hideFlags = HideFlags.HideAndDontSave;
         host.AddComponent<TripodDriver>();
-        Log.LogInfo($"Tripod Cam loaded: {TripodKey.Value} places the tripod, {RecordKey.Value} records, {MenuKey.Value} opens the panel. Videos go to {VideoFolder}");
+        Log.LogInfo($"Tripod Cam loaded: {TripodKey.Value} places the tripod, {RecordKey.Value} records, {MenuKey.Value} opens the panel, {KeyframeKey.Value} adds keyframes. Videos go to {VideoFolder}");
     }
 
     /// Bits per second for a video: the quality's rate at 1080p30, scaled by size and (less than linearly) fps.
@@ -75,3 +81,5 @@ public class Plugin : BasePlugin
 }
 
 internal enum VideoQuality { Low, High, Max }
+
+internal enum PathEnd { Hold, Loop, Stop }

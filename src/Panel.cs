@@ -13,7 +13,8 @@ using Object = UnityEngine.Object;
 
 namespace TripodCam;
 
-/// The Tripod Cam panel (menu key, M): record button, tripod mode and sliders, video settings, shortcuts you can change
+/// The Tripod Cam panel (menu key, M), on the right of the screen so it stays clear of other mods' windows: record
+/// button, tripod mode and sliders (or the keyframe path's settings in mode 4), video settings, shortcuts you can change
 /// by clicking them, and live stats while recording. Like the overlay it's built once ahead of time and only switched
 /// on and off; while it's open it frees the cursor and pauses the game's controls (StickerSwap's way), and it only
 /// refreshes its numbers twice a second.
@@ -26,29 +27,32 @@ internal static class Panel
     static readonly Color Glass = new(1f, 1f, 1f, 0.14f);
     static readonly Color Dim = new(1f, 1f, 1f, 0.5f);
     static readonly Color Ink = new(1f, 1f, 1f, 0.9f);
-    static readonly string[] Modes = { "Fixed", "Aim", "Follow" };
+    static readonly string[] Modes = { "Fixed", "Aim", "Follow", "Keys" };
+    static readonly string[] ShortcutNames = { "Tripod", "Record", "Menu", "Keyframe", "To Flippy" };
     static readonly int[] Heights = { 720, 1080, 1440 };
     static readonly int[] Rates = { 30, 60 };
     static readonly Key[] Blocked =
     {
         Key.W, Key.A, Key.S, Key.D, Key.Q, Key.E, Key.Space, Key.Escape, Key.Enter, Key.NumpadEnter, Key.Tab, Key.Backspace,
         Key.Digit1, Key.Digit2, Key.Digit3, Key.Digit4, Key.LeftShift, Key.RightShift, Key.LeftCtrl, Key.RightCtrl,
-        Key.LeftAlt, Key.RightAlt, Key.UpArrow, Key.DownArrow, Key.LeftArrow, Key.RightArrow, Key.P,
+        Key.LeftAlt, Key.RightAlt, Key.UpArrow, Key.DownArrow, Key.LeftArrow, Key.RightArrow, Key.P, Key.Delete,
     };
     static Key[] allKeys;
 
     static GameObject root;
     static RectTransform panel;
     static TextMeshProUGUI menuKeyText, recordText, recordKeyText, moveText, moveKeyText, smoothValue, fovValue, videoInfo, statsText;
+    static TextMeshProUGUI keysValue, keysHint, placingHelp;
     static TextMeshProUGUI folderText, changeText;
     static Image recordBack, recordIcon, changeBack;
     static Sprite stopSprite;
     static RectTransform recordKeyChip, moveChip, resetFolder;
-    static Segmented modeSeg, sizeSeg, rateSeg, qualitySeg, lookSeg;
+    static Segmented modeSeg, sizeSeg, rateSeg, qualitySeg, lookSeg, endSeg;
+    static GameObject steadyRows, keyRows;
     static Switch previewSwitch, soundSwitch;
     static Slider smoothSlider, fovSlider;
     static CanvasGroup fovGroup, videoGroup;
-    static readonly KeyTile[] tiles = new KeyTile[3];
+    static readonly KeyTile[] tiles = new KeyTile[5];
     static int rebinding = -1, rebindFrame;
     static CursorLockMode oldLock;
     static bool oldVisible;
@@ -79,7 +83,7 @@ internal static class Panel
 
             stopSprite = Overlay.MakeRounded(32, 6);
             panel = Overlay.Node(root.transform, "Panel");
-            Overlay.Anchor(panel, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(64f, -38f), new Vector2(W, H));
+            Overlay.Anchor(panel, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-64f, -38f), new Vector2(W, H));
             Fill(panel, Overlay.rounded, Back, true); // catches clicks so they never fall through
 
             BuildHeader();
@@ -139,15 +143,18 @@ internal static class Panel
 
         modeSeg = new Segmented(panel, Pad, 210f, Inner, 46f, Modes, i => TripodDriver.Instance?.SetMode((TripodDriver.Mode)i));
 
-        Label(panel, "Smoothing", Overlay.medium, 18f, Ink, Pad, 270f, 200f, 26f);
-        smoothValue = Label(panel, "", Overlay.medium, 18f, Ink, W - Pad - 100f, 270f, 100f, 26f, TextAlignmentOptions.MidlineRight);
-        smoothSlider = MakeSlider(panel, 298f, 0f, 2f, v =>
+        // Fixed, Aim and Follow: smoothing and field of view
+        var steady = At(panel, "Steady", 0f, 270f, W, 126f);
+        steadyRows = steady.gameObject;
+        Label(steady, "Smoothing", Overlay.medium, 18f, Ink, Pad, 0f, 200f, 26f);
+        smoothValue = Label(steady, "", Overlay.medium, 18f, Ink, W - Pad - 100f, 0f, 100f, 26f, TextAlignmentOptions.MidlineRight);
+        smoothSlider = MakeSlider(steady, 28f, 0f, 2f, v =>
         {
             Plugin.Smoothing.Value = Mathf.Round(v * 20f) / 20f;
             smoothValue.text = Plugin.Smoothing.Value.ToString("0.00", CultureInfo.InvariantCulture);
         });
 
-        var fovRow = At(panel, "Fov", 0f, 334f, W, 62f);
+        var fovRow = At(steady, "Fov", 0f, 64f, W, 62f);
         fovGroup = fovRow.gameObject.AddComponent<CanvasGroup>();
         Label(fovRow, "Field of view", Overlay.medium, 18f, Ink, Pad, 0f, 200f, 26f);
         fovValue = Label(fovRow, "", Overlay.medium, 18f, Ink, W - Pad - 100f, 0f, 100f, 26f, TextAlignmentOptions.MidlineRight);
@@ -157,6 +164,17 @@ internal static class Panel
             TripodDriver.Instance?.SetFov(fov);
             fovValue.text = $"{fov:0}°";
         });
+
+        // Keyframes: what the path has, and what happens after its last key
+        var keys = At(panel, "Keyframes", 0f, 270f, W, 126f);
+        keyRows = keys.gameObject;
+        Label(keys, "Keyframes", Overlay.medium, 18f, Ink, Pad, 0f, 200f, 26f);
+        keysValue = Label(keys, "", Overlay.medium, 18f, Ink, W - Pad - 240f, 0f, 240f, 26f, TextAlignmentOptions.MidlineRight);
+        Label(keys, "At the end", Overlay.medium, 18f, Ink, Pad, 38f, 120f, 44f);
+        endSeg = new Segmented(keys, Pad + 116f, 38f, Inner - 116f, 44f, new[] { "Hold", "Loop", "Stop rec" }, i => Plugin.PathEndMode.Value = (PathEnd)i);
+        keysHint = Label(keys, "", Overlay.medium, 14f, Dim, Pad, 88f, Inner, 38f);
+        keysHint.enableWordWrapping = true;
+        keyRows.SetActive(false);
 
         previewSwitch = new Switch(panel, 404f, "Live preview while recording", on => Plugin.Preview.Value = on);
     }
@@ -209,17 +227,14 @@ internal static class Panel
     static void BuildShortcuts()
     {
         Section(panel, "SHORTCUTS · CLICK TO CHANGE", 796f);
-        string[] names = { "Tripod", "Record", "Menu" };
-        float w = (Inner - 20f) / 3f;
-        for (int i = 0; i < 3; i++)
+        float w = (Inner - 40f) / 5f;
+        for (int i = 0; i < 5; i++)
         {
             int index = i;
-            tiles[i] = new KeyTile(panel, Pad + i * (w + 10f), 824f, w, 72f, names[i], () => StartRebind(index));
+            tiles[i] = new KeyTile(panel, Pad + i * (w + 10f), 824f, w, 72f, ShortcutNames[i], () => StartRebind(index));
         }
-        Label(panel, "Placing: <color=#3DFF7A>WASD</color> fly · <color=#3DFF7A>Q E</color> down/up · <color=#3DFF7A>Mouse</color> look · " +
-                     "<color=#3DFF7A>Scroll</color> speed · <color=#3DFF7A>Alt+Scroll</color> zoom · <color=#3DFF7A>Shift</color> fast · " +
-                     "<color=#3DFF7A>Ctrl</color> slow · <color=#3DFF7A>1 2 3</color> mode · <color=#3DFF7A>Enter</color>/click plant · " +
-                     "<color=#3DFF7A>Esc</color> cancel", Overlay.medium, 14f, Dim, Pad, 906f, Inner, 54f).enableWordWrapping = true;
+        placingHelp = Label(panel, "", Overlay.medium, 14f, Dim, Pad, 906f, Inner, 54f);
+        placingHelp.enableWordWrapping = true;
         statsText = Label(panel, "", Overlay.medium, 12.5f, new Color(1f, 1f, 1f, 0.42f), Pad, 964f, Inner, 32f);
         statsText.enableWordWrapping = true;
     }
@@ -281,8 +296,24 @@ internal static class Panel
         }
         else SetRecord(Glass, Color.white, "Place the tripod first", Color.clear, true, Plugin.TripodKey.Value);
 
-        moveText.text = planted ? "Move tripod" : "Place tripod";
+        bool keys = driver != null && driver.CurrentMode == TripodDriver.Mode.Keys;
+        moveText.text = keys ? "Edit keys" : planted ? "Move tripod" : "Place tripod";
         modeSeg.Select(driver != null ? (int)driver.CurrentMode : 1);
+        if (steadyRows.activeSelf == keys)
+        {
+            steadyRows.SetActive(!keys);
+            keyRows.SetActive(keys);
+        }
+        if (keys)
+        {
+            var path = driver.Path;
+            keysValue.text = path.Count == 0 ? "none yet" : $"{path.Count} key{(path.Count == 1 ? "" : "s")} · {path.End.ToString("0.00", CultureInfo.InvariantCulture)} s";
+            endSeg.Select((int)Plugin.PathEndMode.Value);
+            string add = KeyName(Plugin.KeyframeKey.Value);
+            keysHint.text = path.Count == 0
+                ? $"<color=#3DFF7A>Edit keys</color>, fly to a spot and press <color=#3DFF7A>{add}</color>. Each {add} adds the next keyframe {Plugin.KeyGap.Value.ToString("0.#", CultureInfo.InvariantCulture)} s later."
+                : $"Recording plays the path from its start. <color=#3DFF7A>{add}</color> while recording starts it over.";
+        }
         smoothSlider.SetValueWithoutNotify(Plugin.Smoothing.Value);
         smoothValue.text = Plugin.Smoothing.Value.ToString("0.00", CultureInfo.InvariantCulture);
         float fov = driver != null ? driver.Fov : 60f;
@@ -312,7 +343,11 @@ internal static class Panel
 
         menuKeyText.text = KeyName(Plugin.MenuKey.Value);
         Overlay.SetChipText(moveChip, moveKeyText, KeyName(Plugin.TripodKey.Value), 10f);
-        for (int i = 0; i < 3; i++) tiles[i].Show(KeyName(Entry(i).Value), rebinding == i);
+        for (int i = 0; i < 5; i++) tiles[i].Show(KeyName(Entry(i).Value), rebinding == i);
+        placingHelp.text = "Placing: <color=#3DFF7A>WASD</color> fly · <color=#3DFF7A>Q E</color> down/up · <color=#3DFF7A>Mouse</color> look · " +
+                           "<color=#3DFF7A>Scroll</color> speed · <color=#3DFF7A>Alt+Scroll</color> zoom · <color=#3DFF7A>Shift</color> fast · " +
+                           $"<color=#3DFF7A>Ctrl</color> slow · <color=#3DFF7A>1 2 3 4</color> mode · <color=#3DFF7A>{KeyName(Plugin.ToFlippyKey.Value)}</color> to Flippy · " +
+                           "<color=#3DFF7A>Enter</color> plant · <color=#3DFF7A>Esc</color> cancel";
         statsText.text = recorder != null && recorder.Recording && recorder.Stats.Length > 0 ? recorder.Stats
             : recorder != null && recorder.Recording ? "Measuring…" : "Live stats show here while recording.";
     }
@@ -403,7 +438,14 @@ internal static class Panel
 
     // ---------------------------------------------------------------- changing a shortcut
 
-    static BepInEx.Configuration.ConfigEntry<Key> Entry(int i) => i == 0 ? Plugin.TripodKey : i == 1 ? Plugin.RecordKey : Plugin.MenuKey;
+    static BepInEx.Configuration.ConfigEntry<Key> Entry(int i) => i switch
+    {
+        0 => Plugin.TripodKey,
+        1 => Plugin.RecordKey,
+        2 => Plugin.MenuKey,
+        3 => Plugin.KeyframeKey,
+        _ => Plugin.ToFlippyKey,
+    };
 
     static void StartRebind(int index)
     {
@@ -438,11 +480,10 @@ internal static class Panel
             }
             var entry = Entry(rebinding);
             var old = entry.Value;
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < 5; i++)
                 if (i != rebinding && Entry(i).Value == key) Entry(i).Value = old; // swap with the action that had it
             entry.Value = key;
-            string[] names = { "Tripod", "Record", "Menu" };
-            Overlay.Toast($"{names[rebinding]} is now {KeyName(key)}");
+            Overlay.Toast($"{ShortcutNames[rebinding]} is now {KeyName(key)}");
             StopRebind();
             return true;
         }
@@ -543,7 +584,7 @@ internal static class Panel
             var tile = At(parent, name, x, y, w, h);
             back = Fill(tile, Overlay.small, new Color(0f, 0f, 0f, 0.22f), true);
             cap = KeyCap(tile, Key.None, (w - 40f) / 2f, 10f, out key);
-            label = Label(tile, name, Overlay.medium, 16f, Ink, 0f, 44f, w, 22f, TextAlignmentOptions.Center);
+            label = Label(tile, name, Overlay.medium, 15f, Ink, 0f, 44f, w, 22f, TextAlignmentOptions.Center);
             Click(tile.gameObject, back, click);
         }
 
@@ -611,14 +652,14 @@ internal static class Panel
     // ---------------------------------------------------------------- plumbing
 
     /// A child laid out from the parent's top-left corner, y going down (like the mockup).
-    static RectTransform At(Transform parent, string name, float x, float y, float w, float h)
+    internal static RectTransform At(Transform parent, string name, float x, float y, float w, float h)
     {
         var rt = Overlay.Node(parent, name);
         Overlay.Anchor(rt, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(x, -y), new Vector2(w, h));
         return rt;
     }
 
-    static Image Fill(RectTransform rt, Sprite sprite, Color color, bool raycast = false)
+    internal static Image Fill(RectTransform rt, Sprite sprite, Color color, bool raycast = false)
     {
         var image = rt.gameObject.AddComponent<Image>();
         if (sprite != null) { image.sprite = sprite; image.type = Image.Type.Sliced; }

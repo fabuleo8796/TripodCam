@@ -12,20 +12,21 @@ namespace TripodCam;
 
 /// Keys and the tripod itself.
 /// - Tripod key: placing mode. The game's camera brain is switched off and the main camera flies (WASD, Q/E, mouse),
-///   the game's controls pause so Flippy stays put. 1/2/3 pick the mode, Enter/click plants, Esc cancels.
+///   the game's controls pause so Flippy stays put. 1/2/3/4 pick the mode, Enter/click plants, Esc cancels. Mode 4's
+///   keyframe editor is in Keyframes.cs.
 /// - Record key: start/stop recording from the planted tripod (Recorder).
 /// - Menu key: the panel (Panel), which also changes the mode, smoothing and field of view of a planted tripod.
-/// - Every frame while recording: the tripod's pose for this frame (Fixed, Aim at Flippy, Follow Flippy), after the
-///   game has moved Flippy (its rigidbody interpolates, so its transform is already smooth here).
-/// Idle cost: reading three keys.
-public class TripodDriver : MonoBehaviour
+/// - Every frame while recording: the tripod's pose for this frame (Fixed, Aim at Flippy, Follow Flippy, Keyframes),
+///   after the game has moved Flippy (its rigidbody interpolates, so its transform is already smooth here).
+/// Idle cost: reading four keys.
+public partial class TripodDriver : MonoBehaviour
 {
     public TripodDriver(IntPtr ptr) : base(ptr) { }
 
     internal static TripodDriver Instance;
-    static readonly string[] ModeNames = { "Fixed", "Aim at Flippy", "Follow Flippy" };
+    static readonly string[] ModeNames = { "Fixed", "Aim at Flippy", "Follow Flippy", "Keyframes" };
 
-    internal enum Mode { Fixed, Aim, Follow }
+    internal enum Mode { Fixed, Aim, Follow, Keys }
 
     // The planted tripod. Fov is the video's vertical field of view.
     bool planted;
@@ -43,7 +44,9 @@ public class TripodDriver : MonoBehaviour
     CinemachineBrain brain;
     bool brainWasOn;
     float gameFov, yaw, pitch, flySpeed, flyFov;
-    Vector3 flyPos;
+    Vector3 flyPos, homeOffset;
+    Quaternion homeRot;
+    static bool scrollLogged;
     Mode placeMode;
 
     readonly Recorder recorder = new();
@@ -92,11 +95,13 @@ public class TripodDriver : MonoBehaviour
             bool tripod = keyboard[Plugin.TripodKey.Value].wasPressedThisFrame;
             bool record = keyboard[Plugin.RecordKey.Value].wasPressedThisFrame;
             bool menu = keyboard[Plugin.MenuKey.Value].wasPressedThisFrame;
-            if (!(tripod || record || menu) || Typing()) return;
+            bool keyframe = keyboard[Plugin.KeyframeKey.Value].wasPressedThisFrame;
+            if (!(tripod || record || menu || keyframe) || Typing()) return;
             bool playing = Cursor.lockState == CursorLockMode.Locked;
             if (tripod && playing) StartPlacing();
             else if (record) ToggleRecording();
             else if (menu && playing) Panel.Open();
+            else if (keyframe) RestartPath();
         }
         catch (Exception e)
         {
@@ -110,17 +115,17 @@ public class TripodDriver : MonoBehaviour
         {
             if (placing && gameCam != null)
             {
-                gameCam.transform.SetPositionAndRotation(flyPos, Quaternion.Euler(pitch, yaw, 0f));
-                gameCam.fieldOfView = ScreenFov(flyFov);
+                var flyRot = Quaternion.Euler(pitch, yaw, 0f);
+                float screenFov = ScreenFov(flyFov);
+                gameCam.transform.SetPositionAndRotation(flyPos, flyRot);
+                gameCam.fieldOfView = screenFov;
+                if (placeMode == Mode.Keys) Timeline.DrawPath(path, playhead, FrameRate, flyPos, flyRot, screenFov);
             }
             if (planted && recorder.WantsFrame())
             {
                 var player = EHS.PlayerRef.LocalPlayer;
-                if (player != null)
-                {
-                    Pose(player.transform.position, out var pos, out var rot);
-                    recorder.Frame(pos, rot, fov);
-                }
+                if (player != null && Pose(player.transform.position, out var pos, out var rot, out var camFov))
+                    recorder.Frame(pos, rot, camFov);
             }
         }
         catch (Exception e)
@@ -140,6 +145,7 @@ public class TripodDriver : MonoBehaviour
         var manager = FindManager();
         if (manager == null || manager.cam == null) { Overlay.Toast("Get into a level first"); return; }
         smoothReady = false; // Aim and Follow start from where Flippy is now
+        pathStart = 0; // the keyframe path starts with the video
         recorder.Start(manager);
     }
 
@@ -152,14 +158,16 @@ public class TripodDriver : MonoBehaviour
     }
 
     /// Switching mode from the panel keeps the camera where it is right now: Follow keeps today's distance to Flippy,
-    /// Fixed keeps the current view.
+    /// Fixed keeps the current view (in Keyframes mode, where the path is).
     [HideFromIl2Cpp]
     internal void SetMode(Mode m)
     {
+        if (m == Mode.Keys && m != mode && path.Count == 0)
+            Overlay.Toast($"No keyframes yet: press {Panel.KeyName(Plugin.TripodKey.Value)}, then 4 and {Panel.KeyName(Plugin.KeyframeKey.Value)} to add some");
         if (planted && m != mode)
         {
             var pos = mode == Mode.Follow && smoothReady ? smoothPos : tripodPos;
-            var rot = mode != Mode.Fixed && smoothReady ? smoothRot : tripodRot;
+            var rot = (mode == Mode.Aim || mode == Mode.Follow) && smoothReady ? smoothRot : tripodRot;
             tripodPos = pos;
             tripodRot = rot;
             var player = EHS.PlayerRef.LocalPlayer;
@@ -198,6 +206,8 @@ public class TripodDriver : MonoBehaviour
             if (placing) EndPlacing();
             if (Panel.IsOpen) Panel.Close();
             planted = false;
+            if (path.Count > 0) path.Clear(); // keyframes are spots in that level
+            playhead = 0f;
         }
     }
 
@@ -213,6 +223,9 @@ public class TripodDriver : MonoBehaviour
         brainWasOn = brain != null && brain.enabled;
         if (brain != null) brain.enabled = false;
         gameFov = gameCam.fieldOfView;
+        var player = EHS.PlayerRef.LocalPlayer;
+        homeOffset = player != null ? gameCam.transform.position - player.transform.position : Vector3.zero; // the game's own view of Flippy
+        homeRot = gameCam.transform.rotation;
 
         var from = planted ? tripodPos : gameCam.transform.position;
         var rot = planted ? tripodRot : gameCam.transform.rotation;
@@ -223,11 +236,15 @@ public class TripodDriver : MonoBehaviour
         flyFov = planted ? fov : VideoFov(gameFov);
         flySpeed = Plugin.FlySpeed.Value;
         placeMode = mode;
+        placeLock = Cursor.lockState;
+        placeCursor = Cursor.visible;
+        if (placeMode == Mode.Keys && path.Sample(Mathf.Min(playhead, path.End), pose)) UsePose(pose); // back where the path is
         placing = true;
         GameControls.Pause();
         Overlay.ShowPlacing(true);
         Overlay.SetMode((int)placeMode);
         Overlay.SetFlyInfo(flyFov, flySpeed);
+        ShowKeyEditor(placeMode == Mode.Keys);
     }
 
     [HideFromIl2Cpp]
@@ -235,17 +252,30 @@ public class TripodDriver : MonoBehaviour
     {
         if (gameCam == null) { EndPlacing(); return; }
         float dt = Time.unscaledDeltaTime;
+        bool keys = placeMode == Mode.Keys;
         if (mouse != null)
         {
-            var look = mouse.delta.ReadValue() * (0.1f * Plugin.LookSpeed.Value);
-            yaw += look.x;
-            pitch = Mathf.Clamp(pitch - look.y, -89f, 89f);
-            float notches = mouse.scroll.ReadValue().y / 120f;
+            if (!mouseMode && !playingPath)
+            {
+                var look = mouse.delta.ReadValue() * (0.1f * Plugin.LookSpeed.Value);
+                yaw += look.x;
+                pitch = Mathf.Clamp(pitch - look.y, -89f, 89f);
+            }
+            float notches = ScrollNotches(mouse);
             if (Mathf.Abs(notches) > 0.01f)
             {
-                if (keyboard.leftAltKey.isPressed || keyboard.rightAltKey.isPressed) flyFov = Mathf.Clamp(flyFov - notches * 3f, 15f, 110f);
-                else flySpeed = Mathf.Clamp(flySpeed * Mathf.Pow(1.2f, notches), 0.5f, 80f);
-                Overlay.SetFlyInfo(flyFov, flySpeed);
+                var at = mouse.position.ReadValue();
+                if (keys && mouseMode && Timeline.Over(at)) // over the timeline: Ctrl+Scroll zooms it, Scroll moves along it
+                {
+                    if (keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed) Timeline.Zoom(at, notches);
+                    else Timeline.Pan(notches);
+                }
+                else
+                {
+                    if (keyboard.leftAltKey.isPressed || keyboard.rightAltKey.isPressed) flyFov = Mathf.Clamp(flyFov - notches * 3f, 15f, 110f);
+                    else flySpeed = Mathf.Clamp(flySpeed * Mathf.Pow(1.2f, notches), 0.5f, 200f);
+                    Overlay.SetFlyInfo(flyFov, flySpeed);
+                }
             }
         }
 
@@ -257,31 +287,59 @@ public class TripodDriver : MonoBehaviour
         if (keyboard.aKey.isPressed) move -= rot * Vector3.right;
         if (keyboard.eKey.isPressed) move += Vector3.up;
         if (keyboard.qKey.isPressed) move -= Vector3.up;
-        float speed = flySpeed * (keyboard.leftShiftKey.isPressed ? 4f : 1f) * (keyboard.leftCtrlKey.isPressed ? 0.25f : 1f);
-        if (move.sqrMagnitude > 1e-6f) flyPos += move.normalized * (speed * dt);
+        float speed = flySpeed * (keyboard.leftShiftKey.isPressed ? Plugin.ShiftBoost.Value : 1f) * (keyboard.leftCtrlKey.isPressed ? 0.25f : 1f);
+        if (move.sqrMagnitude > 1e-6f && !playingPath) flyPos += move.normalized * (speed * dt);
 
         if (keyboard.digit1Key.wasPressedThisFrame) SetPlaceMode(Mode.Fixed);
         if (keyboard.digit2Key.wasPressedThisFrame) SetPlaceMode(Mode.Aim);
         if (keyboard.digit3Key.wasPressedThisFrame) SetPlaceMode(Mode.Follow);
+        if (keyboard.digit4Key.wasPressedThisFrame) SetPlaceMode(Mode.Keys);
+        if (keyboard[Plugin.ToFlippyKey.Value].wasPressedThisFrame) ToFlippy();
+        if (keys != (placeMode == Mode.Keys)) return; // the editor opened or closed this frame
+        if (keys) EditKeys(keyboard, mouse);
 
-        if (keyboard.enterKey.wasPressedThisFrame || keyboard.numpadEnterKey.wasPressedThisFrame || (mouse != null && mouse.leftButton.wasPressedThisFrame)) Plant();
+        // in mode 4 a click belongs to the timeline, so only Enter plants
+        bool plant = keyboard.enterKey.wasPressedThisFrame || keyboard.numpadEnterKey.wasPressedThisFrame;
+        if (plant || (!keys && mouse != null && mouse.leftButton.wasPressedThisFrame)) Plant();
+        else if (keys && playingPath && keyboard.escapeKey.wasPressedThisFrame) StopPlay();
         else if (keyboard.escapeKey.wasPressedThisFrame || keyboard[Plugin.TripodKey.Value].wasPressedThisFrame)
         {
             EndPlacing();
-            Overlay.Toast(planted ? "Kept the tripod where it was" : "Cancelled");
+            Overlay.Toast(keys && path.Count > 0 ? "Closed · your keyframes are kept" : planted ? "Kept the tripod where it was" : "Cancelled");
         }
+    }
+
+    /// The teleport key: the camera jumps back to Flippy, seen the way the game showed it when placing started.
+    [HideFromIl2Cpp]
+    void ToFlippy()
+    {
+        var player = EHS.PlayerRef.LocalPlayer;
+        if (player == null) return;
+        StopPlay();
+        flyPos = player.transform.position + homeOffset;
+        var e = homeRot.eulerAngles;
+        yaw = e.y;
+        pitch = Mathf.Clamp(Mathf.DeltaAngle(0f, e.x), -89f, 89f);
+        Overlay.Toast("Camera back at Flippy");
     }
 
     [HideFromIl2Cpp]
     void SetPlaceMode(Mode m)
     {
+        if (m == placeMode) return;
         placeMode = m;
         Overlay.SetMode((int)m);
+        ShowKeyEditor(m == Mode.Keys);
     }
 
     [HideFromIl2Cpp]
     void Plant()
     {
+        if (placeMode == Mode.Keys && path.Count == 0)
+        {
+            Overlay.Toast($"Add a keyframe first: {Panel.KeyName(Plugin.KeyframeKey.Value)} sets one where the camera is");
+            return;
+        }
         var player = EHS.PlayerRef.LocalPlayer;
         planted = true;
         mode = placeMode;
@@ -291,13 +349,18 @@ public class TripodDriver : MonoBehaviour
         followOffset = player != null ? flyPos - player.transform.position : Vector3.zero;
         smoothReady = false;
         EndPlacing();
-        Overlay.Toast(recorder.Active ? "Tripod moved" : $"Tripod planted · {Panel.KeyName(Plugin.RecordKey.Value)} to record · {Panel.KeyName(Plugin.MenuKey.Value)} for the panel");
+        string record = Panel.KeyName(Plugin.RecordKey.Value);
+        if (mode == Mode.Keys)
+            Overlay.Toast(recorder.Active ? "Keyframe path updated" : $"Keyframe path ready · {record} records it from the start");
+        else
+            Overlay.Toast(recorder.Active ? "Tripod moved" : $"Tripod planted · {record} to record · {Panel.KeyName(Plugin.MenuKey.Value)} for the panel");
     }
 
     [HideFromIl2Cpp]
     void EndPlacing()
     {
         placing = false;
+        ShowKeyEditor(false);
         if (gameCam != null) gameCam.fieldOfView = gameFov;
         if (brain != null) brain.enabled = brainWasOn; // the brain puts the camera back on Flippy next frame
         brain = null;
@@ -307,17 +370,21 @@ public class TripodDriver : MonoBehaviour
 
     // ----- the tripod's pose -----
 
+    /// False when the keyframe path just ended the recording.
     [HideFromIl2Cpp]
-    void Pose(Vector3 flippy, out Vector3 pos, out Quaternion rot)
+    bool Pose(Vector3 flippy, out Vector3 pos, out Quaternion rot, out float camFov)
     {
         float dt = Mathf.Max(Time.deltaTime, 1e-4f), smoothing = Plugin.Smoothing.Value;
         var aimAt = flippy + Vector3.up * Plugin.AimHeight.Value;
+        camFov = fov;
         switch (mode)
         {
+            case Mode.Keys:
+                return PathPose(out pos, out rot, out camFov);
             case Mode.Fixed:
                 pos = tripodPos;
                 rot = tripodRot;
-                return;
+                return true;
             case Mode.Follow:
                 var want = flippy + followOffset; // world offset: Flippy tumbles, the camera doesn't
                 if (!smoothReady) { smoothPos = want; smoothVel = Vector3.zero; }
@@ -333,6 +400,7 @@ public class TripodDriver : MonoBehaviour
         if (!smoothReady) { smoothRot = look; smoothReady = true; }
         smoothRot = smoothing <= 0f ? look : Quaternion.Slerp(smoothRot, look, 1f - Mathf.Exp(-dt / (smoothing * 0.25f)));
         rot = smoothRot;
+        return true;
     }
 
     // ----- helpers -----
@@ -368,6 +436,21 @@ public class TripodDriver : MonoBehaviour
         var found = Object.FindObjectsOfType(Il2CppType.Of<EHS.CameraManager>());
         cachedManager = found != null && found.Length > 0 ? found[0].TryCast<EHS.CameraManager>() : null;
         return cachedManager;
+    }
+
+    /// Scroll wheel steps this frame. This game's Input System gives 1 per notch (its "uniform" scroll setting);
+    /// Windows' own range is 120 per notch, in case a game update switches to it.
+    [HideFromIl2Cpp]
+    static float ScrollNotches(Mouse mouse)
+    {
+        float y = mouse.scroll.ReadValue().y;
+        if (y == 0f) return 0f;
+        if (!scrollLogged)
+        {
+            scrollLogged = true;
+            Plugin.Logger.LogInfo($"Scroll wheel reads {y.ToString(System.Globalization.CultureInfo.InvariantCulture)} per step");
+        }
+        return Mathf.Abs(y) >= 20f ? y / 120f : y;
     }
 
     [HideFromIl2Cpp]

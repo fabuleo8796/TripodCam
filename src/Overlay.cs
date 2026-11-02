@@ -11,7 +11,7 @@ namespace TripodCam;
 /// The on-screen parts, StickerSwap's style made cheap: dark see-through pills with Geist text, built once a few
 /// seconds after launch, then only switched on and off. Nothing here runs per frame except a toast's 0.4 s fade-out.
 /// - Placing: the video's frame (with dark bars where the screen's shape differs), thirds, the mode switcher, fly
-///   info, key hints.
+///   info, key hints, and in mode 4 the keyframe timeline and path (Timeline.cs).
 /// - REC badge with the time (updates once a second), and the live preview while recording.
 /// - Toasts.
 /// The panel (Panel.cs) is built from the same pieces.
@@ -22,25 +22,27 @@ internal static class Overlay
     internal static readonly Color AccentText = new(0.024f, 0.17f, 0.08f, 1f);
     internal static readonly Color RecRed = new(1f, 0.231f, 0.188f, 1f);
     internal static readonly Color Muted = new(1f, 1f, 1f, 0.72f);
-    static readonly string[] ModeLabels = { "1   Fixed", "2   Aim at Flippy", "3   Follow Flippy" };
+    static readonly string[] ModeLabels = { "1   Fixed", "2   Aim at Flippy", "3   Follow Flippy", "4   Keyframes" };
     static readonly string[] ModeHints =
     {
         "Stays exactly where you plant it",
         "Stays put and turns to keep Flippy in frame",
         "Moves with Flippy at the same distance and angle",
+        "Glides smoothly through the keyframes you set",
     };
 
     static bool built;
     static GameObject placing, rec, toast, preview;
-    static RectTransform frame, barA, barB, modeBar, modeHintChip, flyChip, recChip, toastChip;
-    static readonly Image[] modeChips = new Image[3];
-    static readonly TextMeshProUGUI[] modeTexts = new TextMeshProUGUI[3];
-    static TextMeshProUGUI modeHint, flyInfo, recText, toastText, previewText;
+    static RectTransform frame, barA, barB, modeBar, modeHintChip, flyChip, recChip, toastChip, plantChip, escChip, keysChip;
+    static readonly Image[] modeChips = new Image[4];
+    static readonly TextMeshProUGUI[] modeTexts = new TextMeshProUGUI[4];
+    static TextMeshProUGUI modeHint, flyInfo, recText, toastText, previewText, plantText, escText, keysText;
     static RawImage previewImage;
     static CanvasGroup toastGroup;
     static float toastUntil;
     static string recInfo = "";
     internal static TMP_FontAsset semiBold, medium;
+    internal static Canvas canvas;
     internal static Sprite rounded, small, circle;
 
     public static void Build()
@@ -57,7 +59,7 @@ internal static class Overlay
 
             var canvasGo = new GameObject("TripodCam UI");
             Object.DontDestroyOnLoad(canvasGo);
-            var canvas = canvasGo.AddComponent<Canvas>();
+            canvas = canvasGo.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 30010;
             var scaler = canvasGo.AddComponent<CanvasScaler>();
@@ -109,7 +111,7 @@ internal static class Overlay
         // mode switcher: a dark pill with three chips, the chosen one green
         modeBar = Chip(frame, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -36f), 58f, 0f, PanelColor, "", medium, 1f, Color.clear, out _);
         float x = 6f;
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
         {
             var chip = Chip(modeBar, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(x, 0f), 46f, 22f, Color.clear, ModeLabels[i], semiBold, 20f, Muted, out modeTexts[i]);
             modeChips[i] = chip.GetComponent<Image>();
@@ -119,13 +121,12 @@ internal static class Overlay
         modeHintChip = Chip(frame, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -104f), 36f, 16f, PanelColor, ModeHints[1], medium, 17f, Muted, out modeHint);
 
         flyChip = Chip(frame, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -40f), 46f, 20f, PanelColor, "", medium, 19f, Color.white, out flyInfo);
-        Chip(frame, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 40f), 46f, 20f, PanelColor,
-            "<color=#3DFF7A>WASD</color> fly   <color=#3DFF7A>Q E</color> down / up   <color=#3DFF7A>Mouse</color> look   <color=#3DFF7A>Scroll</color> speed   <color=#3DFF7A>Alt+Scroll</color> zoom   <color=#3DFF7A>Shift</color> fast   <color=#3DFF7A>Ctrl</color> slow",
-            medium, 18f, Muted, out _);
-        Chip(frame, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-40f, 40f), 50f, 22f, Accent,
-            "Enter / Click  plant here", semiBold, 20f, AccentText, out _);
-        Chip(frame, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-40f, 100f), 40f, 18f, PanelColor,
-            "Esc  cancel", medium, 17f, Muted, out _);
+        keysChip = Chip(frame, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 40f), 46f, 20f, PanelColor, "", medium, 18f, Muted, out keysText);
+        plantChip = Chip(frame, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-40f, 40f), 50f, 22f, Accent,
+            "Enter / Click  plant here", semiBold, 20f, AccentText, out plantText);
+        escChip = Chip(frame, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-40f, 100f), 40f, 18f, PanelColor,
+            "Esc  cancel", medium, 17f, Muted, out escText);
+        Timeline.Build(placing.transform, frame);
         placing.SetActive(false);
     }
 
@@ -184,19 +185,29 @@ internal static class Overlay
     {
         if (!built) Build();
         if (placing == null) return;
-        if (on) LayoutFrame();
+        if (on)
+        {
+            LayoutFrame();
+            SetChipText(keysChip, keysText,
+                "<color=#3DFF7A>WASD</color> fly   <color=#3DFF7A>Q E</color> down / up   <color=#3DFF7A>Mouse</color> look   <color=#3DFF7A>Scroll</color> speed   " +
+                "<color=#3DFF7A>Alt+Scroll</color> zoom   <color=#3DFF7A>Shift</color> fast   <color=#3DFF7A>Ctrl</color> slow   " +
+                $"<color=#3DFF7A>{Panel.KeyName(Plugin.ToFlippyKey.Value)}</color> to Flippy", 20f);
+        }
         placing.SetActive(on);
     }
 
     public static void SetMode(int mode)
     {
         if (placing == null) return;
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
         {
             modeChips[i].color = i == mode ? Accent : Color.clear;
             modeTexts[i].color = i == mode ? AccentText : Muted;
         }
-        SetChipText(modeHintChip, modeHint, ModeHints[Math.Clamp(mode, 0, 2)], 16f);
+        SetChipText(modeHintChip, modeHint, ModeHints[Math.Clamp(mode, 0, 3)], 16f);
+        bool keys = mode == 3; // in mode 4 a click belongs to the timeline
+        SetChipText(plantChip, plantText, keys ? "Enter  use this path" : "Enter / Click  plant here", 22f);
+        SetChipText(escChip, escText, keys ? "Esc  close, keys are kept" : "Esc  cancel", 18f);
     }
 
     public static void SetFlyInfo(float fov, float speed)
@@ -241,6 +252,7 @@ internal static class Overlay
         if (!built) Build();
         if (toast == null) return;
         SetChipText(toastChip, toastText, text, 24f);
+        toastChip.anchoredPosition = new Vector2(0f, Timeline.Shown ? Timeline.Top + 30f : 150f); // above the keyframe timeline
         toastGroup.alpha = 1f;
         toast.SetActive(true);
         toastUntil = Time.unscaledTime + 3f;
