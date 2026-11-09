@@ -18,6 +18,8 @@ namespace TripodCam;
 /// - Menu key: the panel (Panel), which also changes the mode, smoothing and field of view of a planted tripod.
 /// - Every frame while recording: the tripod's pose for this frame (Fixed, Aim at Flippy, Follow Flippy, Keyframes),
 ///   after the game has moved Flippy (its rigidbody interpolates, so its transform is already smooth here).
+/// - The camera model (CameraModel) stands where the tripod films, worked out every frame by TripodPose: see-through
+///   while planted, solid while recording (and then it also goes to other players through FIH Sync, SyncLink).
 /// Idle cost: reading four keys.
 public partial class TripodDriver : MonoBehaviour
 {
@@ -54,6 +56,12 @@ public partial class TripodDriver : MonoBehaviour
     float playerMissing = -1f;
     int previewShown;
 
+    // The camera model in the world while recording, and the tripod's settings it's worked out from.
+    CameraModel.Rig model;
+    readonly TripodPose display = new();
+    bool modelShown;
+    int take;
+
     [HideFromIl2Cpp] internal Recorder Recorder => recorder;
     [HideFromIl2Cpp] internal bool Planted => planted;
     [HideFromIl2Cpp] internal Mode CurrentMode => mode;
@@ -64,6 +72,7 @@ public partial class TripodDriver : MonoBehaviour
         try
         {
             Instance ??= this;
+            SyncLink.Start();
             Overlay.Tick();
             Panel.TakeFolder();
             if (!prepared && Time.unscaledTime > 6f)
@@ -127,6 +136,9 @@ public partial class TripodDriver : MonoBehaviour
                 if (player != null && Pose(player.transform.position, out var pos, out var rot, out var camFov))
                     recorder.Frame(pos, rot, camFov);
             }
+            UpdateModel();
+            CameraModel.Tick();
+            SyncLink.Tick(Time.deltaTime);
         }
         catch (Exception e)
         {
@@ -146,6 +158,7 @@ public partial class TripodDriver : MonoBehaviour
         if (manager == null || manager.cam == null) { Overlay.Toast("Get into a level first"); return; }
         smoothReady = false; // Aim and Follow start from where Flippy is now
         pathStart = 0; // the keyframe path starts with the video
+        take++;
         recorder.Start(manager);
     }
 
@@ -401,6 +414,66 @@ public partial class TripodDriver : MonoBehaviour
         smoothRot = smoothing <= 0f ? look : Quaternion.Slerp(smoothRot, look, 1f - Mathf.Exp(-dt / (smoothing * 0.25f)));
         rot = smoothRot;
         return true;
+    }
+
+    // ----- the camera model -----
+
+    /// Whenever the tripod is planted (and the model is switched on in the panel): the little camera stands where the
+    /// tripod films, see-through until you record, solid while recording. It's worked out every frame, so it moves
+    /// smoothly even when the video takes fewer frames than the game draws.
+    [HideFromIl2Cpp]
+    void UpdateModel()
+    {
+        var player = EHS.PlayerRef.LocalPlayer;
+        bool recording = recorder.Active;
+        CameraModel.GhostAlpha = Plugin.GhostOpacity.Value;
+        bool want = planted && Plugin.ShowCamera.Value && player != null && (recording || Plugin.GhostOpacity.Value > 0.01f);
+        if (!want)
+        {
+            if (modelShown) { model?.Show(false); modelShown = false; }
+            return;
+        }
+        if (model == null || !model.Alive)
+        {
+            var manager = FindManager();
+            if (manager != null) CameraModel.HiddenLayer(manager.cam); // on its layer from the start, before any recording
+            model = new CameraModel.Rig("TripodCam Camera Model");
+        }
+        FillPose(display);
+        if (!modelShown) display.Restart();
+        model.SetGhost(!recording);
+        float dt = Time.deltaTime;
+        // not recording: a keyframe path shows where it starts
+        display.Get(player.transform.position, recording ? (float)(recorder.Seconds - pathStart) : 0f, dt, out var pos, out var rot);
+        model.Place(pos, rot, Plugin.CameraSize.Value, dt);
+        model.Show(!CameraModel.TooClose(pos, Plugin.CameraSize.Value));
+        modelShown = true;
+    }
+
+    [HideFromIl2Cpp]
+    void FillPose(TripodPose p)
+    {
+        p.Mode = mode;
+        p.Pos = tripodPos;
+        p.Rot = tripodRot;
+        p.FollowOffset = followOffset;
+        p.AimHeight = Plugin.AimHeight.Value;
+        p.Smoothing = Plugin.Smoothing.Value;
+        p.Path = path;
+        p.End = Plugin.PathEndMode.Value;
+        p.Take = take;
+    }
+
+    /// What FIH Sync sends to other modded players: the tripod's settings while recording with the model on, else null.
+    /// In Keyframes mode only the path goes (the spot the recording last passed changes every frame).
+    [HideFromIl2Cpp]
+    internal string ShareState()
+    {
+        if (!planted || !recorder.Active || !Plugin.ShowCamera.Value) return null;
+        var p = new TripodPose();
+        FillPose(p);
+        if (mode == Mode.Keys) { p.Pos = Vector3.zero; p.Rot = Quaternion.identity; }
+        return p.Write();
     }
 
     // ----- helpers -----

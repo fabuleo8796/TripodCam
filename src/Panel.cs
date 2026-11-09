@@ -14,13 +14,13 @@ using Object = UnityEngine.Object;
 namespace TripodCam;
 
 /// The Tripod Cam panel (menu key, M), on the right of the screen so it stays clear of other mods' windows: record
-/// button, tripod mode and sliders (or the keyframe path's settings in mode 4), video settings, shortcuts you can change
+/// button, tripod mode and sliders (or the keyframe path's settings in mode 4), the camera model switch, video settings, shortcuts you can change
 /// by clicking them, and live stats while recording. Like the overlay it's built once ahead of time and only switched
 /// on and off; while it's open it frees the cursor and pauses the game's controls (StickerSwap's way), and it only
 /// refreshes its numbers twice a second.
 internal static class Panel
 {
-    const float W = 468f, H = 1004f, Pad = 26f, Inner = W - 2 * Pad;
+    const float W = 468f, H = 1044f, Pad = 26f, Inner = W - 2 * Pad;
     const float ChangeX = W - Pad - 80f - 8f - 104f, FolderWidth = ChangeX - 10f - Pad;
     static readonly Color Back = new(0.05f, 0.11f, 0.12f, 0.88f);
     static readonly Color Soft = new(1f, 1f, 1f, 0.09f);
@@ -49,7 +49,7 @@ internal static class Panel
     static RectTransform recordKeyChip, moveChip, resetFolder;
     static Segmented modeSeg, sizeSeg, rateSeg, qualitySeg, lookSeg, endSeg;
     static GameObject steadyRows, keyRows;
-    static Switch previewSwitch, soundSwitch;
+    static Switch previewSwitch, soundSwitch, cameraSwitch;
     static Slider smoothSlider, fovSlider;
     static CanvasGroup fovGroup, videoGroup;
     static readonly KeyTile[] tiles = new KeyTile[5];
@@ -83,7 +83,7 @@ internal static class Panel
 
             stopSprite = Overlay.MakeRounded(32, 6);
             panel = Overlay.Node(root.transform, "Panel");
-            Overlay.Anchor(panel, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-64f, -38f), new Vector2(W, H));
+            Overlay.Anchor(panel, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-64f, -20f), new Vector2(W, H));
             Fill(panel, Overlay.rounded, Back, true); // catches clicks so they never fall through
 
             BuildHeader();
@@ -177,12 +177,13 @@ internal static class Panel
         keyRows.SetActive(false);
 
         previewSwitch = new Switch(panel, 404f, "Live preview while recording", on => Plugin.Preview.Value = on);
+        cameraSwitch = new Switch(panel, 444f, "Show the camera in the world", on => Plugin.ShowCamera.Value = on);
     }
 
     static void BuildVideo()
     {
-        Section(panel, "VIDEO", 460f);
-        var box = At(panel, "Video", 0f, 484f, W, 236f);
+        Section(panel, "VIDEO", 500f);
+        var box = At(panel, "Video", 0f, 524f, W, 236f);
         videoGroup = box.gameObject.AddComponent<CanvasGroup>();
         sizeSeg = new Segmented(box, Pad, 0f, Inner, 46f, new[] { "720p", "1080p", "1440p" }, i =>
         {
@@ -201,9 +202,9 @@ internal static class Panel
         videoInfo.enableWordWrapping = true;
 
         // where videos go: the path, a × back to the default folder (only when it's changed), Change and Open
-        folderText = Label(panel, "", Overlay.medium, 16f, Ink, Pad, 736f, FolderWidth, 40f);
+        folderText = Label(panel, "", Overlay.medium, 16f, Ink, Pad, 776f, FolderWidth, 40f);
         folderText.overflowMode = TextOverflowModes.Ellipsis;
-        resetFolder = At(panel, "Default", ChangeX - 38f, 742f, 28f, 28f);
+        resetFolder = At(panel, "Default", ChangeX - 38f, 782f, 28f, 28f);
         var resetBack = Fill(resetFolder, Overlay.circle, Glass, true);
         foreach (var angle in new[] { 45f, -45f })
         {
@@ -214,11 +215,11 @@ internal static class Panel
             bar.localRotation = Quaternion.Euler(0f, 0f, angle);
         }
         Click(resetFolder.gameObject, resetBack, ResetFolder);
-        var change = At(panel, "Change", ChangeX, 736f, 104f, 40f);
+        var change = At(panel, "Change", ChangeX, 776f, 104f, 40f);
         changeBack = Fill(change, Overlay.small, Glass, true);
         changeText = Label(change, "Change", Overlay.semiBold, 17f, Color.white, 0f, 0f, 104f, 40f, TextAlignmentOptions.Center);
         Click(change.gameObject, changeBack, ChangeFolder);
-        var open = At(panel, "Open", W - Pad - 80f, 736f, 80f, 40f);
+        var open = At(panel, "Open", W - Pad - 80f, 776f, 80f, 40f);
         var openBack = Fill(open, Overlay.small, Glass, true);
         Label(open, "Open", Overlay.semiBold, 17f, Color.white, 0f, 0f, 80f, 40f, TextAlignmentOptions.Center);
         Click(open.gameObject, openBack, OpenFolder);
@@ -226,16 +227,16 @@ internal static class Panel
 
     static void BuildShortcuts()
     {
-        Section(panel, "SHORTCUTS · CLICK TO CHANGE", 796f);
+        Section(panel, "SHORTCUTS · CLICK TO CHANGE", 836f);
         float w = (Inner - 40f) / 5f;
         for (int i = 0; i < 5; i++)
         {
             int index = i;
-            tiles[i] = new KeyTile(panel, Pad + i * (w + 10f), 824f, w, 72f, ShortcutNames[i], () => StartRebind(index));
+            tiles[i] = new KeyTile(panel, Pad + i * (w + 10f), 864f, w, 72f, ShortcutNames[i], () => StartRebind(index));
         }
-        placingHelp = Label(panel, "", Overlay.medium, 14f, Dim, Pad, 906f, Inner, 54f);
+        placingHelp = Label(panel, "", Overlay.medium, 14f, Dim, Pad, 946f, Inner, 54f);
         placingHelp.enableWordWrapping = true;
-        statsText = Label(panel, "", Overlay.medium, 12.5f, new Color(1f, 1f, 1f, 0.42f), Pad, 964f, Inner, 32f);
+        statsText = Label(panel, "", Overlay.medium, 12.5f, new Color(1f, 1f, 1f, 0.42f), Pad, 1004f, Inner, 32f);
         statsText.enableWordWrapping = true;
     }
 
@@ -321,6 +322,7 @@ internal static class Panel
         fovValue.text = planted ? $"{fov:0}°" : "–";
         SetGroup(fovGroup, planted);
         previewSwitch.Set(Plugin.Preview.Value);
+        cameraSwitch.Set(Plugin.ShowCamera.Value);
         soundSwitch.Set(Plugin.Sound.Value);
 
         int height = Plugin.Height.Value, rate = Plugin.Fps.Value;

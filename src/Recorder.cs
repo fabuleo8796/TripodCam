@@ -72,6 +72,7 @@ internal sealed class Recorder
     // Their renderer is switched off just for the tripod camera's render and back on right after.
     ParticleSystemRenderer speedLines;
     static ParticleSystemRenderer hiddenLines;
+    static bool modelHidden; // no free layer for the camera model: it's switched off during the tripod's render
 
     static AssetBundle shaderBundle;
     static AssetBundleCreateRequest bundleLoad;
@@ -143,6 +144,8 @@ internal sealed class Recorder
         cam.enabled = false;
         cam.depth = game.depth - 10;
         if (Plugin.HideNames.Value) cam.cullingMask &= ~((1 << 5) | (1 << 15) | (1 << 16)); // UI, UIOnTop, Pings
+        int model = CameraModel.HiddenLayer(game); // the camera model in the world never goes into the video
+        if (model >= 0) cam.cullingMask &= ~(1 << model);
         cam.allowMSAA = game.allowMSAA && Plugin.SmoothEdges.Value;
         var src = game.GetComponent<UniversalAdditionalCameraData>();
         var dst = host.GetComponent<UniversalAdditionalCameraData>();
@@ -475,6 +478,7 @@ internal sealed class Recorder
             var r = current;
             if (r == null || r.cam == null || camera == null || camera.Pointer != r.cam.Pointer) return;
             cameraStart = Stopwatch.GetTimestamp();
+            if (CameraModel.NeedsRenderHide) { CameraModel.RenderHide(true); modelHidden = true; }
             if (r.speedLines != null && r.speedLines.enabled) // enabled, not forceRenderingOff: its getter is rebuilt (trap 19)
             {
                 r.speedLines.enabled = false;
@@ -494,6 +498,11 @@ internal sealed class Recorder
             var lines = hiddenLines;
             hiddenLines = null;
             try { if (lines != null) lines.enabled = true; } catch { /* gone with the level */ }
+        }
+        if (modelHidden) // same: the player's own view must always get the camera model back
+        {
+            modelHidden = false;
+            try { CameraModel.RenderHide(false); } catch { /* never break the game's rendering */ }
         }
         if (cameraStart == 0) return;
         try

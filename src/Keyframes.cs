@@ -276,6 +276,7 @@ public partial class TripodDriver
     {
         if (!planted || mode != Mode.Keys || !recorder.Recording || path.Count == 0) return;
         pathStart = recorder.Seconds;
+        take++; // other players' copies start the path over too
         Overlay.Toast("Keyframe path restarted");
     }
 

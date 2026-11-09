@@ -1,4 +1,4 @@
-# Tripod Cam (0.4.0)
+# Tripod Cam (0.5.0)
 
 A Flipping is Hard mod (BepInEx 6 IL2CPP) by Fabuleo8796.
 - **T**: fly a camera to frame a shot, then plant a tripod there. In placing mode, **WASD / Q E** fly (**Shift** 12×
@@ -20,6 +20,13 @@ A Flipping is Hard mod (BepInEx 6 IL2CPP) by Fabuleo8796.
   field of view (or the keyframe path and what happens at its end), video size, fps, quality, shadows, smooth edges,
   hide names, record sound, live preview, the video folder (Change opens Windows' folder picker, × goes back to the
   default), shortcuts (click to change) and live stats while recording.
+- **Camera model**: a little cinema camera on a tripod stands where the tripod films, pointing the way it films (it
+  turns and tilts with Aim, Follow and Keyframes, its legs reach down to the ground). Once planted it's see-through, so
+  you can see where your shot is; while you record it's solid and its REC light blinks. It's never in your own videos,
+  and it hides when your own view gets right up to it. Switch it off in the panel (**Show the camera in the world**);
+  in the cfg, `CameraSize` makes it bigger or smaller and `GhostOpacity` sets how see-through it is before you record
+  (0 = only while recording). It's built in code
+  (boxes and cylinders), no game art.
 
 ## Install
 
@@ -27,14 +34,16 @@ Needs Flipping is Hard with BepInEx 6 (IL2CPP) and Windows 10 2004 or newer (for
 Download `release/TripodCam.dll` and put it in `<game>\BepInEx\plugins\TripodCam\`. Settings are in
 `BepInEx\config\com.fabuleo8796.tripodcam.cfg` and in the panel (**M**).
 
-Client-side only: nothing is sent to other players. MIT license.
+Nothing is sent to other players, with one exception: if you also have **FIH Sync** (coming soon), other modded players (with Tripod
+Cam and FIH Sync) see your camera model while you record, and you see theirs. Only your tripod's settings go out
+(where it stands, its mode, smoothing and keyframe path), once when you start recording, never your video. MIT license.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `release/TripodCam.dll` | The built mod (0.4.0) |
-| `src/` | The mod: `Plugin` (settings), `TripodDriver` (keys, placing, tripod modes), `Recorder` (tripod camera, NV12 conversion, readback, encoder thread, stats), `MfEncoder` (Media Foundation H.264 MP4, NV12 or BGRA input, optional AAC sound stream), `AudioCapture` (the game's own sound from Windows' application loopback, on its own thread), `Overlay` (placing view, REC badge, preview, toasts), `Panel` (the M panel), `KeyPath` (keyframes and the smooth curves through them, no Unity types), `Keyframes` (the keyframe editor and path playback), `Timeline` (the timeline and the path drawn over the world), `FolderPicker` (Windows' Select folder window on its own thread), `GameControls` (pauses the game's input while placing or in the panel) |
+| `release/TripodCam.dll` | The built mod (the latest release) |
+| `src/` | The mod: `Plugin` (settings), `TripodDriver` (keys, placing, tripod modes), `Recorder` (tripod camera, NV12 conversion, readback, encoder thread, stats), `MfEncoder` (Media Foundation H.264 MP4, NV12 or BGRA input, optional AAC sound stream), `AudioCapture` (the game's own sound from Windows' application loopback, on its own thread), `Overlay` (placing view, REC badge, preview, toasts), `Panel` (the M panel), `KeyPath` (keyframes and the smooth curves through them, no Unity types), `Keyframes` (the keyframe editor and path playback), `Timeline` (the timeline and the path drawn over the world), `FolderPicker` (Windows' Select folder window on its own thread), `GameControls` (pauses the game's input while placing or in the panel), `CameraModel` (the camera on a tripod you see in the world while recording, meshes built in code, kept off the tripod camera's layers), `TripodPose` (where a tripod's camera is each frame, worked out from its settings; also its one-line form for FIH Sync), `SyncLink` (the optional FIH Sync link) |
 | `src/Resources/` | Geist fonts (OFL), embedded |
 | `unity/` | Minimal Unity 6000.0.66f1 project (no packages) holding the NV12 shader and `TripodCamBuild`, which builds the shader bundle and checks the shader's output against the same maths on the CPU |
 | `tests/EncoderTest/` | Offline test of `MfEncoder` (writes test MP4s, no game needed) |
@@ -60,6 +69,7 @@ The response file holds:
 - references to the game's `dotnet\System.*.dll`, `mscorlib` and `netstandard` (skip `*Native*`);
 - references to `BepInEx\core` (BepInEx.Core, BepInEx.Unity.IL2CPP, BepInEx.Unity.Common, 0Harmony, Il2CppInterop.Runtime/Common);
 - every `BepInEx\interop\*.dll` **except the 3 KB `UnityEngine.dll` facade**;
+- `lib\FIHSync.dll` (FIH Sync's DLL, for the optional camera model sharing; Tripod Cam runs fine without it installed);
 - `-resource:src\Resources\<file>,<file>` for the three font files, and `-resource:build\bundle\tripodcam.shaders,tripodcam.shaders`;
 - all of `src\*.cs`.
 

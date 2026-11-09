@@ -13,9 +13,11 @@ namespace TripodCam;
 
 /// Tripod Cam for Flipping is Hard: press T to fly a camera to a spot and plant a tripod there (fixed, aiming at
 /// Flippy, following Flippy, or gliding through keyframes you set with I), press Y to record what it sees (and the
-/// game's sound) to an MP4 while you keep playing, M for the panel.
-/// Client-side only: nothing is sent to other players.
-[BepInPlugin(Guid, "Tripod Cam", "0.4.0")]
+/// game's sound) to an MP4 while you keep playing, M for the panel. A little camera on a tripod stands where it films
+/// (see-through until you record, never in the video).
+/// Nothing is sent to other players, unless FIH Sync is installed: then modded players see your camera model too.
+[BepInPlugin(Guid, "Tripod Cam", "0.5.0")]
+[BepInDependency("com.fabuleo8796.fihsync", BepInDependency.DependencyFlags.SoftDependency)]
 public class Plugin : BasePlugin
 {
     public const string Guid = "com.fabuleo8796.tripodcam";
@@ -23,10 +25,10 @@ public class Plugin : BasePlugin
     internal static ConfigEntry<Key> TripodKey, RecordKey, MenuKey, KeyframeKey, ToFlippyKey;
     internal static ConfigEntry<int> Width, Height, Fps;
     internal static ConfigEntry<VideoQuality> Quality;
-    internal static ConfigEntry<bool> GpuEncoder, HideNames, Shadows, SmoothEdges, Preview, Sound;
+    internal static ConfigEntry<bool> GpuEncoder, HideNames, Shadows, SmoothEdges, Preview, Sound, ShowCamera;
     internal static ConfigEntry<int> SoundOffsetMs;
     internal static ConfigEntry<string> Folder;
-    internal static ConfigEntry<float> FlySpeed, LookSpeed, ShiftBoost, Smoothing, AimHeight, KeyGap;
+    internal static ConfigEntry<float> FlySpeed, LookSpeed, ShiftBoost, Smoothing, AimHeight, KeyGap, CameraSize, GhostOpacity;
     internal static ConfigEntry<PathEnd> PathEndMode;
 
     public override void Load()
@@ -54,6 +56,9 @@ public class Plugin : BasePlugin
         ShiftBoost = Config.Bind("Placing", "ShiftBoost", 12f, new ConfigDescription("How many times faster the camera flies while Shift is held.", new AcceptableValueRange<float>(2f, 50f)));
         Smoothing = Config.Bind("Tripod", "Smoothing", 0.35f, new ConfigDescription("How smoothly Aim and Follow turn and move (0 = locked on).", new AcceptableValueRange<float>(0f, 2f)));
         AimHeight = Config.Bind("Tripod", "AimHeight", 0.3f, "Aim this far above Flippy's middle.");
+        ShowCamera = Config.Bind("Tripod", "ShowCamera", true, "While recording, a little camera on a tripod stands where the tripod films (never in your own videos). With FIH Sync, modded players see yours and you see theirs. Off hides them all.");
+        CameraSize = Config.Bind("Tripod", "CameraSize", 1f, new ConfigDescription("Size of the camera model (1 = about half as long as Flippy).", new AcceptableValueRange<float>(0.5f, 3f)));
+        GhostOpacity = Config.Bind("Tripod", "GhostOpacity", 0.35f, new ConfigDescription("While the tripod is planted but not recording, the camera model shows see-through at this opacity (0 = only show it while recording, 1 = solid).", new AcceptableValueRange<float>(0f, 1f)));
         KeyGap = Config.Bind("Keyframes", "Gap", 2f, new ConfigDescription("Seconds between keyframes added one after another (drag them on the timeline to change it).", new AcceptableValueRange<float>(0.25f, 30f)));
         PathEndMode = Config.Bind("Keyframes", "AtEnd", PathEnd.Hold, "After the last keyframe while recording: Hold (the camera stays there), Loop (the path starts over) or Stop (recording stops).");
 
