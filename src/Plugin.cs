@@ -16,7 +16,7 @@ namespace TripodCam;
 /// game's sound) to an MP4 while you keep playing, M for the panel. A little camera on a tripod stands where it films
 /// (see-through until you record, never in the video).
 /// Nothing is sent to other players, unless FIH Sync is installed: then modded players see your camera model too.
-[BepInPlugin(Guid, "Tripod Cam", "0.5.0")]
+[BepInPlugin(Guid, "Tripod Cam", "0.5.1")]
 [BepInDependency("com.fabuleo8796.fihsync", BepInDependency.DependencyFlags.SoftDependency)]
 public class Plugin : BasePlugin
 {

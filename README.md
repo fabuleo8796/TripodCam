@@ -28,14 +28,17 @@ A Flipping is Hard mod (BepInEx 6 IL2CPP) by Fabuleo8796.
   (0 = only while recording). It's built in code
   (boxes and cylinders), no game art.
 
+> **FIH Sync comes included** (since 0.5.1): `FIHSync.dll` is in the mod's folder, so sharing with other modded players works without installing anything else. With several of my mods installed, BepInEx runs only one copy of it (the newest).
+
 ## Install
 
 Needs Flipping is Hard with BepInEx 6 (IL2CPP) and Windows 10 2004 or newer (for the sound).
-Download `release/TripodCam.dll` and put it in `<game>\BepInEx\plugins\TripodCam\`. Settings are in
+Download the zip from the latest release and extract it into the game folder (you get
+`<game>\BepInEx\plugins\TripodCam\` with `TripodCam.dll` and `FIHSync.dll`), or install it from FIH Mod Manager. Settings are in
 `BepInEx\config\com.fabuleo8796.tripodcam.cfg` and in the panel (**M**).
 
-Nothing is sent to other players, with one exception: if you also have **FIH Sync** (coming soon), other modded players (with Tripod
-Cam and FIH Sync) see your camera model while you record, and you see theirs. Only your tripod's settings go out
+Nothing is sent to other players, with one exception: through the included **FIH Sync**, other modded players with Tripod
+Cam see your camera model while you record, and you see theirs. Only your tripod's settings go out
 (where it stands, its mode, smoothing and keyframe path), once when you start recording, never your video. MIT license.
 
 ## Layout
